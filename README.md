@@ -18,7 +18,9 @@ This project implements a standard 8-N-1 UART (8 data bits, no parity, 1 stop bi
      baudrate_generator, transmitter, and receiver as sub-blocks, with tx_clk_en / rx_clk_en
      and tx_temp signal connections labeled. -->
 
-![UART Block Diagram](docs/block_diagram.png)
+![UART Block Diagram](doc/transmitter.png)
+![UART Block Diagram](doc/receiver.png)
+![UART Block Diagram](doc/baud.png)
 
 ## FSM State Diagrams
 
@@ -77,7 +79,7 @@ $finish called at ... -->
      and the reconstructed data_out byte. In Vivado: after running Behavioral Simulation,
      right-click the waveform pane → "Save as Screenshot", or use a snipping tool. -->
 
-![Simulation Waveform](docs/waveform.png)
+![Simulation Waveform](doc/simulation.png)
 
 ## Design Notes / Debugging Log
 
