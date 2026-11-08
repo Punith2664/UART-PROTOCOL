@@ -1,4 +1,8 @@
-module receiver(input clk,rst,rx,rdy_clr,clken,output reg  rdy,output reg [7:0] data_out);
+module receiver(
+	input clk,rst,rx,rdy_clr,clken,
+	output reg  rdy,
+	output reg [7:0] data_out
+);
    
 parameter RX_STATE_START	    = 2'b00;
 parameter RX_STATE_data_out		= 2'b01;
