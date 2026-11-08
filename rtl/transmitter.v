@@ -1,5 +1,10 @@
 
-module transmitter(input clk,wr_en,enb,rst,input [7:0] data_in,output reg tx,output tx_busy);
+module transmitter(
+	input clk,wr_en,enb,rst,
+	input [7:0] data_in,
+	output reg tx,
+	output tx_busy
+);
     
 parameter STATE_IDLE	= 2'b00;
 parameter STATE_START	= 2'b01;
