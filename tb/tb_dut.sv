@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 interface uart_if (input bit clk);
     logic rst;
     logic [7:0] data_in;
