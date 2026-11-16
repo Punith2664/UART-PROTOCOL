@@ -1,65 +1,56 @@
-
-module transmitter(
-	input clk,wr_en,enb,rst,
-	input [7:0] data_in,
-	output reg tx,
-	output tx_busy
+module transmitter (
+  input clk,
+  input rst,
+  input [7:0] data_in,
+  input tx_enb,
+  input start,
+  output reg tx,
+  output reg busy
 );
-    
-parameter STATE_IDLE	= 2'b00;
-parameter STATE_START	= 2'b01;
-parameter STATE_DATA	= 2'b10;
-parameter STATE_STOP	= 2'b11;
-
-reg [7:0] data = 8'h00;
-reg [2:0] bitpos = 3'h0;
-reg [1:0] state = STATE_IDLE;
-
-always @(posedge clk) begin
-    if (rst) begin
-        tx     <= 1'b1;
-        state  <= STATE_IDLE;
-        bitpos <= 3'h0;
-        data   <= 8'h00;
-    end else 
-    begin
-        case (state)
-	STATE_IDLE: begin
-		if (wr_en) begin
-			state <= STATE_START;
-			data <= data_in;
-			bitpos <= 3'h0;
-		end
-	end
-	STATE_START: begin
-		if (enb) begin
-			tx <= 1'b0;
-			state <= STATE_DATA;
-		end
-	end
-	STATE_DATA: begin
-		if (enb) begin
-			if (bitpos == 3'h7)
-				state <= STATE_STOP;
-			else
-				bitpos <= bitpos + 3'h1;
-			tx <= data[bitpos];
-		end
-	end
-	STATE_STOP: begin
-		if (enb) begin
-			tx <= 1'b1;
-			state <= STATE_IDLE;
-		end
-	end
-	default: begin
-		tx <= 1'b1;
-		state <= STATE_IDLE;
-	end
-	endcase
-end
-end
-
-assign tx_busy = (state != STATE_IDLE);
-    
+  parameter IDLE = 2'd0, START = 2'd1, DATA = 2'd2, STOP = 2'd3;
+  reg [2:0] state;
+  reg [2:0] bit_cnt;
+  reg [7:0] shift_reg;
+  always @(posedge clk) begin
+    if(rst) begin
+      tx <= 1'b1;
+      busy <= 1'b0;
+      bit_cnt <= 3'd0;
+      shift_reg <= 8'd0;
+      state <= IDLE;
+    end else begin
+      case (state)
+        IDLE: begin
+          if(start) begin
+            shift_reg <= data_in;
+            tx <= 1'b1;
+            bit_cnt <= 3'd0;
+            state <= START;
+          end
+        end
+        START: begin
+          tx <= 1'b0;
+          busy <= 1'b1;
+          if(tx_enb) state <= DATA;
+        end
+        DATA: begin
+          tx <= shift_reg[bit_cnt];
+          if(tx_enb && busy) begin
+            bit_cnt <= bit_cnt + 3'd1;
+            if(bit_cnt == 3'd7) begin
+              state <= STOP;
+              bit_cnt <= 3'd0;
+            end
+          end
+        end
+        STOP: begin
+          tx <= 1'b1;
+          if(tx_enb) begin
+            busy <= 1'b0;
+            state <= IDLE;
+          end
+        end
+      endcase
+    end
+  end
 endmodule
