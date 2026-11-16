@@ -1,68 +1,66 @@
-module receiver(
-	input clk,rst,rx,rdy_clr,clken,
-	output reg  rdy,
-	output reg [7:0] data_out
+module receiver (
+  input clk,
+  input rst,
+  input rx_enb,
+  input rx,
+  output reg [7:0] data_out,
+  output reg ready
 );
-   
-parameter RX_STATE_START	    = 2'b00;
-parameter RX_STATE_data_out		= 2'b01;
-parameter RX_STATE_STOP		    = 2'b10;
-
-reg [1:0] state = RX_STATE_START;
-reg [3:0] sample = 0;
-reg [3:0] index = 0;
-reg [7:0] temp = 8'b0;
-
-
-always @(posedge clk) begin
-    if (rst) begin
-        rdy      <= 0;
-        data_out <= 0;
-        state    <= RX_STATE_START;
-        sample   <= 0;
-        index    <= 0;
-        temp     <= 0;
+  parameter IDLE = 2'd0, START = 2'd1, DATA = 2'd2, STOP = 2'd3;
+  reg [1:0] state;
+  reg [2:0] bit_cnt;
+  reg [3:0] sample_cnt;
+  always @(posedge clk) begin
+    if(rst) begin
+      data_out <= 8'd0;
+      ready <= 1'b0;
+      bit_cnt <= 3'd0;
+      sample_cnt <= 4'd0;
+      state <= IDLE;
     end else begin
-        if (rdy_clr)
-            rdy <= 0;
-	if (clken) begin
-		case (state)
-		RX_STATE_START: begin
-			if (!rx || sample != 0)
-				sample <= sample + 4'b1;
-
-			if (sample == 15) begin
-				state <= RX_STATE_data_out;
-				index <= 0;
-				sample <= 0;
-				temp <= 0;
-			end
-		end
-		RX_STATE_data_out: begin
-			sample <= sample + 4'b1;
-			if (sample == 4'h8) begin
-				temp[index] <= rx;
-				index <= index + 4'b1;
-			end
-			if (index == 8 && sample == 15)
-				state <= RX_STATE_STOP;
-		end
-		RX_STATE_STOP: begin
-			if (sample == 15 ) begin
-				state <= RX_STATE_START;
-				data_out <= temp;
-				rdy <= 1'b1;
-				sample <= 0;
-			end else begin
-				sample <= sample + 4'b1;
-			end
-		end
-		default: begin
-			state <= RX_STATE_START;
-		end
-		endcase
-	end
-end
-end
-
+      case (state)
+        IDLE: begin
+          ready <= 1'b0;
+          if(!rx) begin
+            sample_cnt <= 4'd0;
+            state <= START;
+          end
+        end
+        START: begin
+          if(rx_enb) begin
+            sample_cnt <= sample_cnt + 4'd1;
+            if(sample_cnt == 4'd7) begin
+              if(!rx) begin
+                sample_cnt <= 4'd0;
+                state <= DATA;
+              end else state <= IDLE;
+            end
+          end
+        end
+        DATA: begin
+          if(rx_enb) begin
+            sample_cnt <= sample_cnt + 4'd1;
+            if(sample_cnt == 4'd15) begin
+              data_out[bit_cnt] <= rx;
+              sample_cnt <= 4'd0;
+              bit_cnt <= bit_cnt + 3'd1;
+              if(bit_cnt == 3'd7) begin
+                state <= STOP;
+                bit_cnt <= 3'd0;
+              end
+            end
+          end
+        end
+        STOP: begin
+          if(rx_enb) begin
+            sample_cnt <= sample_cnt + 4'd1;
+            if(sample_cnt == 4'd15) begin
+              ready <= 1'b1;
+              state <= IDLE;
+            end
+          end
+        end
+      endcase
+    end
+  end
 endmodule
