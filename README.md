@@ -1,106 +1,104 @@
-# UART (Universal Asynchronous Receiver/Transmitter) — Verilog RTL
+# UART Protocol — Verilog RTL & SystemVerilog Functional Verification
 
-A synthesizable UART implementation in Verilog, featuring a configurable baud rate generator, an 8-bit transmitter, an 8-bit receiver with 16x oversampling, and a self-checking testbench.
+A UART **8-N-1** (8 data bits, no parity, one stop bit) implementation in Verilog, with a **non-UVM, class-based SystemVerilog** verification environment. The SV testbench wires the DUT's `tx` output back to its `rx` input to test serial loopback.
 
-## Overview
+> **Verification status:** Updated code and diagrams are committed for review. The current SV simulation has **not been run or signed off**; no pass rate or coverage closure is claimed.
 
-This project implements a standard 8-N-1 UART (8 data bits, no parity, 1 stop bit) from scratch in Verilog:
+## RTL architecture
 
-- **`baudrate_generator`** — generates enable pulses for the transmitter (1x baud rate) and receiver (16x baud rate, for oversampling) from a system clock.
-- **`transmitter`** — a 4-state FSM (`IDLE → START → DATA → STOP`) that serializes an 8-bit input byte onto a `tx` line.
-- **`receiver`** — a 4-state FSM that samples an incoming serial line at 16x the baud rate, detects the start bit, and reconstructs the received byte.
-- **`uart_top`** — top-level module wiring the above together.
-- **`uart_top_tb`** — testbench that sends bytes through the transmitter, loops them back into the receiver, and checks the received data.
-
-## Block Diagram
-
-<!-- Add your block diagram here. Recommended: a simple diagram showing uart_top with
-     baudrate_generator, transmitter, and receiver as sub-blocks, with tx_clk_en / rx_clk_en
-     and tx_temp signal connections labeled. -->
-
-![UART Block Diagram](doc/transmitter.png)
-![UART Block Diagram](doc/receiver.png)
-![UART Block Diagram](doc/baud.png)
-
-## FSM State Diagrams
-
-### Transmitter
-
-```
-IDLE --(wr_en)--> START --(enb)--> DATA --(8 bits sent)--> STOP --(enb)--> IDLE
+```mermaid
+flowchart LR
+    C["clk / rst"] --> B["baud_rate (br)<br/>10 MHz / 9600 baud"]
+    B -- "tx_enb (1x)" --> T["transmitter (tr)<br/>IDLE → START → DATA → STOP"]
+    B -- "rx_enb (16x)" --> R["receiver (rc)<br/>IDLE → START → DATA → STOP"]
+    I["data_in[7:0], start"] --> T
+    T --> O["tx, busy"]
+    X["rx serial input"] --> R
+    R --> Y["data_out[7:0], ready"]
+    O -. "testbench loopback: tx → rx" .-> X
 ```
 
-### Receiver
+The top-level `top_uart` instantiates `baud_rate`, `transmitter`, and `receiver`. The design exposes separate serial `tx` and `rx` pins; **loopback exists in the testbench, not in the synthesizable top module**.
 
-```
-START --(16 samples, start bit confirmed)--> DATA --(8 bits sampled)--> STOP --(16 samples)--> START
-```
+[Edit the RTL diagram in draw.io](doc/uart_rtl_architecture.drawio) · [Edit the verification diagram in draw.io](doc/uart_verification_architecture.drawio)
 
-## Repository Structure
+## Functional verification architecture
 
-```
-.
-├── rtl/
-│   ├── baudrate_generator.v
-│   ├── transmitter.v
-│   ├── receiver.v
-│   └── uart_top.v
-├── tb/
-│   └── uart_top_tb.v
-├── docs/
-│   └── block_diagram.png
-└── README.md
-```
-
-## How to Simulate
-
-Simulated using **Xilinx Vivado** (XSIM):
-
-1. Open Vivado and create a new project (or use an existing one).
-2. Add all files under `rtl/` as design sources.
-3. Add `tb/uart_top_tb.v` as a simulation source, and set it as the top module for simulation.
-4. Run **Behavioral Simulation** (Flow Navigator → SIMULATION → Run Simulation → Run Behavioral Simulation).
-5. View signals in the Vivado waveform viewer, or check the Tcl Console for `$display` output.
-
-Any other Verilog simulator (Icarus Verilog, ModelSim, Verilator, etc.) will also work — compile all files under `rtl/` along with `tb/uart_top_tb.v` and run.
-
-## Simulation Output
-
-<!-- Paste your console output here, e.g.:
-received data is 41
-received data is 55
-$finish called at ... -->
-
-```
-(paste simulation console output here)
+```mermaid
+flowchart TD
+    G["Generator<br/>constrained-random transaction"] --> M1["Driver mailbox"]
+    M1 --> D["Driver<br/>uart_if.DRV clocking block"]
+    D --> DUT["DUT: top_uart<br/>TX → loopback → RX"]
+    DUT --> MON["Monitor<br/>uart_if.MON clocking block"]
+    MON -- "TX transaction" --> RM["Reference model<br/>expected = data_in"]
+    RM --> EM["Expected mailbox"]
+    MON -- "RX transaction" --> AM["Actual mailbox"]
+    EM --> SC["Scoreboard<br/>compare expected === actual"]
+    AM --> SC
+    MON --> COV["Functional coverage<br/>data_in / data_out / start / ready"]
+    D -- "drv_done" --> G
 ```
 
-<!-- Add a waveform screenshot here, from Vivado's waveform viewer, showing tx/rx lines
-     and the reconstructed data_out byte. In Vivado: after running Behavioral Simulation,
-     right-click the waveform pane → "Save as Screenshot", or use a snipping tool. -->
+The testbench includes a transaction class, constrained-random generator, mailbox-based driver, monitor with separate transmit/receive tasks, reference model, scoreboard, environment, interface clocking blocks and functional covergroup. The scoreboard compares transmitted payloads against reconstructed receiver payloads.
 
-![Simulation Waveform](doc/simulation.png)
+### Coverage intent
 
-## Design Notes / Debugging Log
+- Directed bins for `8'h00`, `8'hFF`, `8'hAA`, `8'h55` plus data ranges
+- TX-side `start`, RX-side `ready`, transmitted and received payload bins
+- The testbench waits for 100% reported coverage or a simulation timeout; a timeout is **not** evidence of coverage closure.
 
-A few real bugs were found and fixed during development — noting them here since they're common pitfalls in sequential Verilog design:
+## Source layout
 
-- **Multiple `always` blocks driving the same signal.** Reset logic was originally split into a separate `always` block from the main FSM, which is not correct RTL style. Fixed by folding reset into the same clocked block as the FSM (`if (rst) ... else case(state) ...`).
-- **Mixed blocking (`=`) and non-blocking (`<=`) assignments** inside clocked (`always @(posedge clk)`) blocks — a common source of simulation/synthesis mismatches. Standardized on non-blocking assignments throughout all sequential logic.
-- **Incorrectly chained conditionals in the receiver.** `rdy_clr` handling and the main receive FSM (`clken` + `case`) were accidentally written as an `if / else` chain, meaning clearing `rdy` would skip an entire FSM cycle. Fixed by making them independent `if` statements.
-- **Incomplete reset.** FSM state registers (`state`, `bitpos`, `index`, `sample`, `temp`, `data`) were not included in the reset path, relying only on initial-value declarations — not valid for real hardware reset. Fixed by resetting all state-holding registers explicitly.
-
-## Configuration
-
-Baud rate and system clock frequency are set via parameters in `baudrate_generator`:
-
-```verilog
-parameter clk_freq  = 100_000_000; // system clock, Hz
-parameter baud_rate = 9600;        // desired baud rate
+```text
+rtl/
+  baud_gen.v       # new baud_rate module
+  transmitter.v    # TX FSM
+  receiver.v       # RX FSM
+  top_uart.v       # new top_uart module
+tb/
+  tb_dut.sv        # SV interface/classes + tb_top
+sim/
+  questa.do        # simulator compilation and run script
+doc/
+  uart_rtl_architecture.drawio
+  uart_verification_architecture.drawio
+  ...              # existing images retained
 ```
 
-Override these at instantiation for different clock/baud combinations, or to speed up simulation (e.g. smaller divisors for quick testbench runs).
+> **Legacy compatibility:** This repo also retains earlier file(s) such as `rtl/baudrate_generator.v`, `rtl/uart_top.v`, and `tb/uart_top_tb.v` if present. They belong to the original Verilog-only version and may not have compatible interfaces with the newly supplied transmitter/receiver. **Do not compile all RTL files with a wildcard.** Use the explicit source list below for the updated SV design. The legacy testbench and older diagrams are retained for history, not as validation evidence for the new version.
 
-## License
+## Running Questa/ModelSim
 
-MIT — see [LICENSE](LICENSE).
+Use a simulator with support for SV **classes, mailboxes, constrained randomization, clocking blocks, and covergroups**. From the repository root:
+
+```tcl
+vlib work
+vlog -sv rtl/baud_gen.v rtl/transmitter.v rtl/receiver.v rtl/top_uart.v tb/tb_dut.sv
+vsim -c tb_top
+run -all
+quit -f
+```
+
+Alternatively run `do sim/questa.do` in the simulator console. If you run from another folder, adapt file paths.
+
+- Default RTL baud configuration: `CLK_FREQ=10_000_000`, `BAUD=9600`
+- SV testbench: `timescale 1ns/1ps` and `always #50 clk = ~clk` (10 MHz)
+- Serial protocol: idle high, low start bit, eight payload bits LSB-first, high stop bit
+- Scoreboard prints match/mismatch messages and an end-of-run pass/fail count
+- Functional coverage percentages are only meaningful when observed in a supported simulator
+
+## Current limitations and next steps
+
+1. **No verified regression results yet.** Run the test and attach simulator transcript/waveform evidence before advertising a pass.
+2. The SV testbench uses an **internal loopback**; external RX stimulus, parity, framing-error injection, and independent TX/RX clock variation are not implemented.
+3. Scoreboard summary helps reporting, but formal completion criteria should also require enough compared transactions and appropriate coverage closure.
+4. Module baud-frequency divisors are integer-truncated, and the RTL does not implement a parity bit.
+5. The new files are **not UVM** and no assertions or coverage closure report are claimed.
+
+## Editable diagrams
+
+Open the two `.drawio` files in [diagrams.net](https://app.diagrams.net/). Modify and export PNG/SVG if needed. Earlier images in `doc/` were preserved unchanged.
+
+## Project evolution
+
+The repo originally included a Verilog-only UART demonstration and legacy images. This update adds a separately runnable class-based SystemVerilog verification environment while retaining the Git history and historical artifacts.
